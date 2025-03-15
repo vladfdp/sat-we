@@ -1,0 +1,20 @@
+[package]
+name = "sat-we"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+
+[dependencies]
+ark-ff = "0.4.0"
+ark-ec = "0.4.0"
+ark-poly = "0.4.0"
+ark-bls12-381 = "0.4.0"
+ark-std = "0.4.0"
+rand = "0.8.5"
+blake3 = "1.5.0"
+aes = "0.8.3"
+aes-gcm = "0.10.3"
+
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
