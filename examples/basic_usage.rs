@@ -109,21 +109,18 @@ fn create_less_than_50_formula() -> CNFFormula {
     
     let mut clauses = Vec::new();
     
-    // A number >= 64 has prefix 111..., so we add (¬x0 ∨ ¬x1 ∨ ¬x2)
     clauses.push(Clause::new(vec![
         Literal::new_negative(0),
         Literal::new_negative(1),
         Literal::new_negative(2),
     ]));
     
-    // A number in range 56-63 has prefix 1101..., so we add (¬x0 ∨ ¬x1 ∨ x2 ∨ ¬x3)
     clauses.push(Clause::new(vec![
         Literal::new_negative(0),
         Literal::new_negative(1),
         Literal::new_negative(3),
     ]));
     
-    // A number in range 52-55 has prefix 11001..., so we add (¬x0 ∨ ¬x1 ∨ x2 ∨ x3 ∨ ¬x4)
     clauses.push(Clause::new(vec![
         Literal::new_negative(0),
         Literal::new_negative(1),
