@@ -13,6 +13,7 @@ use aes::{Aes256, Block, cipher::{
     BlockEncrypt, BlockDecrypt,
     KeyInit
 }};
+use ark_serialize::{CanonicalSerialize, Compress};
 
 /// The structured reference string (SRS) for the KZG polynomial commitment scheme
 #[derive(Clone, Debug)]
@@ -166,9 +167,11 @@ pub fn encapsulate<E: Pairing>(
     let generator_g2 = E::G2::generator();
     let pairing_output = E::pairing(scaled_difference, generator_g2);
     
-    // Convert pairing output to bytes using debug format
-    let serialized = format!("{:?}", pairing_output);
-    let symmetric_key = *blake3::hash(serialized.as_bytes()).as_bytes();
+    // Serialize the pairing output using canonical serialization
+    let mut serialized = Vec::new();
+    pairing_output.serialize_with_mode(&mut serialized, Compress::Yes)
+        .expect("Failed to serialize pairing output");
+    let symmetric_key = *blake3::hash(&serialized).as_bytes();
     
     let shifted_generator = srs.powers_of_g2[1].into_group() - E::G2::generator().mul(*point);
     let hint = shifted_generator.mul(randomness);
@@ -179,9 +182,11 @@ pub fn decapsulate<E: Pairing>(proof: &E::G1Affine, hint: &E::G2Affine) -> [u8; 
     let hint_group = hint.into_group();
     let pairing_output = E::pairing(proof, hint_group);
     
-    // Convert pairing output to bytes using debug format
-    let serialized = format!("{:?}", pairing_output);
-    *blake3::hash(serialized.as_bytes()).as_bytes()
+    // Serialize the pairing output using canonical serialization
+    let mut serialized = Vec::new();
+    pairing_output.serialize_with_mode(&mut serialized, Compress::Yes)
+        .expect("Failed to serialize pairing output");
+    *blake3::hash(&serialized).as_bytes()
 }
 
 
@@ -396,7 +401,6 @@ mod tests {
         // Create a polynomial of degree 5
         let mut poly_coeffs: Vec<Fr> = Vec::new();
         for _ in 0..6 {
-            
             poly_coeffs.push(Fr::rand(&mut rng));
         }
 
