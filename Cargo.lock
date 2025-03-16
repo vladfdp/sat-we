@@ -482,6 +482,7 @@ dependencies = [
  "ark-ec",
  "ark-ff",
  "ark-poly",
+ "ark-serialize",
  "ark-std",
  "blake3",
  "rand",

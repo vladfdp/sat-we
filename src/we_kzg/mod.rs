@@ -9,7 +9,7 @@ use ark_std::{
 };
 use blake3;
 use ark_std::fmt::Debug;
-use aes::{Aes256, Block, cipher::{
+use aes::{Aes128, Block, cipher::{
     BlockEncrypt, BlockDecrypt,
     KeyInit
 }};
@@ -39,7 +39,7 @@ pub struct KZGProof<E: Pairing> {
 
 #[derive(Clone, Debug)]
 pub struct CipherHint<E: Pairing> {
-    pub ciphertext: [u8; 32],
+    pub ciphertext: [u8; 16],
     pub hint: E::G2Affine,
 }
 
@@ -160,7 +160,7 @@ pub fn encapsulate<E: Pairing>(
     point: &E::ScalarField, 
     evaluation: &E::ScalarField, 
     rng: &mut impl Rng
-) -> ([u8; 32], E::G2Affine) {
+) -> ([u8; 16], E::G2Affine) {
     let randomness = E::ScalarField::rand(rng);
     let commitment_minus_eval = commitment.0.into_group() - E::G1::generator().mul(*evaluation);
     let scaled_difference = commitment_minus_eval.mul(randomness);
@@ -171,14 +171,18 @@ pub fn encapsulate<E: Pairing>(
     let mut serialized = Vec::new();
     pairing_output.serialize_with_mode(&mut serialized, Compress::Yes)
         .expect("Failed to serialize pairing output");
-    let symmetric_key = *blake3::hash(&serialized).as_bytes();
+    
+    // Create a fixed-size array for the symmetric key
+    let hash = blake3::hash(&serialized);
+    let mut symmetric_key = [0u8; 16];
+    symmetric_key.copy_from_slice(&hash.as_bytes()[0..16]);
     
     let shifted_generator = srs.powers_of_g2[1].into_group() - E::G2::generator().mul(*point);
     let hint = shifted_generator.mul(randomness);
     (symmetric_key, hint.into_affine())
 }
 
-pub fn decapsulate<E: Pairing>(proof: &E::G1Affine, hint: &E::G2Affine) -> [u8; 32] {
+pub fn decapsulate<E: Pairing>(proof: &E::G1Affine, hint: &E::G2Affine) -> [u8; 16] {
     let hint_group = hint.into_group();
     let pairing_output = E::pairing(proof, hint_group);
     
@@ -186,14 +190,17 @@ pub fn decapsulate<E: Pairing>(proof: &E::G1Affine, hint: &E::G2Affine) -> [u8; 
     let mut serialized = Vec::new();
     pairing_output.serialize_with_mode(&mut serialized, Compress::Yes)
         .expect("Failed to serialize pairing output");
-    *blake3::hash(&serialized).as_bytes()
+    
+    // Create a fixed-size array for the symmetric key
+    let hash = blake3::hash(&serialized);
+    let mut symmetric_key = [0u8; 16];
+    symmetric_key.copy_from_slice(&hash.as_bytes()[0..16]);
+    symmetric_key
 }
 
-
-/// Encrypts a 32-byte message using a key derived from the KZG commitment scheme
-/// The message must be exactly 32 bytes (2 AES blocks)
+/// Encrypts a 16-byte message using a key derived from the KZG commitment scheme
 pub fn witness_encrypt<E: Pairing>(
-    message: &[u8; 32],
+    message: &[u8; 16],
     srs: &KZGStructuredReferenceString<E>,
     commitment: &KZGCommitment<E>,
     point: &E::ScalarField,
@@ -203,21 +210,16 @@ pub fn witness_encrypt<E: Pairing>(
     // Derive the symmetric key
     let (symmetric_key, hint) = encapsulate(srs, commitment, point, evaluation, rng);
     
-    // Use AES-256 for encryption
-    let cipher = Aes256::new_from_slice(&symmetric_key).expect("Invalid key length");
+    // Use AES-128 for encryption
+    let cipher = Aes128::new_from_slice(&symmetric_key).expect("Invalid key length");
     
-    // Convert the message to blocks
-    let mut block1 = Block::clone_from_slice(&message[0..16]);
-    let mut block2 = Block::clone_from_slice(&message[16..32]);
+    // Create a block from the message and encrypt it
+    let mut block = Block::clone_from_slice(message);
+    cipher.encrypt_block(&mut block);
     
-    // Encrypt each block
-    cipher.encrypt_block(&mut block1);
-    cipher.encrypt_block(&mut block2);
-    
-    // Create a fixed-size array for ciphertext
-    let mut ciphertext = [0u8; 32];
-    ciphertext[0..16].copy_from_slice(block1.as_slice());
-    ciphertext[16..32].copy_from_slice(block2.as_slice());
+    // Create the ciphertext
+    let mut ciphertext = [0u8; 16];
+    ciphertext.copy_from_slice(block.as_slice());
     
     CipherHint {
         ciphertext,
@@ -225,30 +227,24 @@ pub fn witness_encrypt<E: Pairing>(
     }
 }
 
-/// Decrypts a 32-byte message using a key derived from the KZG proof and ciphertext
+/// Decrypts a 16-byte message using a key derived from the KZG proof and ciphertext
 pub fn witness_decrypt<E: Pairing>(
     cipher_hint: &CipherHint<E>,
     proof: &E::G1Affine
-) -> [u8; 32] {
-    
+) -> [u8; 16] {
     // Derive the symmetric key
-    let symmetric_key = decapsulate::<E>(&proof, &cipher_hint.hint);
+    let symmetric_key = decapsulate::<E>(proof, &cipher_hint.hint);
     
-    // Use AES-256 for decryption
-    let cipher = Aes256::new_from_slice(&symmetric_key).expect("Invalid key length");
+    // Use AES-128 for decryption
+    let cipher = Aes128::new_from_slice(&symmetric_key).expect("Invalid key length");
     
-    // Split ciphertext into blocks
-    let mut block1 = Block::clone_from_slice(&cipher_hint.ciphertext[0..16]);
-    let mut block2 = Block::clone_from_slice(&cipher_hint.ciphertext[16..32]);
+    // Create a block from the ciphertext and decrypt it
+    let mut block = Block::clone_from_slice(&cipher_hint.ciphertext);
+    cipher.decrypt_block(&mut block);
     
-    // Decrypt each block
-    cipher.decrypt_block(&mut block1);
-    cipher.decrypt_block(&mut block2);
-    
-    // Combine blocks into the plaintext
-    let mut plaintext = [0u8; 32];
-    plaintext[0..16].copy_from_slice(block1.as_slice());
-    plaintext[16..32].copy_from_slice(block2.as_slice());
+    // Create the plaintext
+    let mut plaintext = [0u8; 16];
+    plaintext.copy_from_slice(block.as_slice());
     
     plaintext
 }
@@ -418,8 +414,8 @@ mod tests {
         // Create a proof for the evaluation
         let proof = create_proof(&srs, &polynomial, &point, &evaluation);
         
-        // Original message to encrypt (exactly 32 bytes)
-        let message = [0x41u8; 32];
+        // Original message to encrypt (16 bytes)
+        let message = [0x41u8; 16];
         
         // Encrypt the message
         let cipher_hint = witness_encrypt(
@@ -448,6 +444,5 @@ mod tests {
             // Only reaches here if the decryption didn't panic
             assert_ne!(wrong_decrypted, message, "Decryption succeeded with wrong proof!");
         });
-
     }
 } 

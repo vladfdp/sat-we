@@ -6,7 +6,7 @@ use ark_std::rand::Rng;
 use ark_std::Zero;
 use aes_gcm::{
     aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce
+    Aes128Gcm, Nonce
 };
 use rand::RngCore;
 
@@ -35,9 +35,9 @@ pub struct WEHint<E:Pairing>{
 }
 
 /// Encrypt a message using AES-GCM with authenticated encryption
-fn encrypt_aes(message: &[u8], key: &[u8; 32]) -> Vec<u8> {
+fn encrypt_aes(message: &[u8], key: &[u8; 16]) -> Vec<u8> {
     // Create cipher instance
-    let cipher = Aes256Gcm::new_from_slice(key).expect("Invalid key length");
+    let cipher = Aes128Gcm::new_from_slice(key).expect("Invalid key length");
     
     // Create a random 96-bit nonce (12 bytes)
     let mut nonce_bytes = [0u8; 12];
@@ -58,14 +58,14 @@ fn encrypt_aes(message: &[u8], key: &[u8; 32]) -> Vec<u8> {
 }
 
 /// Decrypt a message using AES-GCM with authenticated encryption
-pub fn decrypt_aes(ciphertext: &[u8], key: &[u8; 32]) -> Vec<u8> {
+pub fn decrypt_aes(ciphertext: &[u8], key: &[u8; 16]) -> Vec<u8> {
     // Need at least a nonce (12 bytes) and some ciphertext
     if ciphertext.len() <= 12 {
         panic!("Ciphertext is too short");
     }
     
     // Create cipher instance
-    let cipher = Aes256Gcm::new_from_slice(key).expect("Invalid key length");
+    let cipher = Aes128Gcm::new_from_slice(key).expect("Invalid key length");
     
     // Extract nonce from the first 12 bytes
     let nonce = Nonce::from_slice(&ciphertext[..12]);
@@ -136,7 +136,7 @@ pub fn sat_encryption<'a, E:Pairing>(
     rng: &mut impl Rng
 ) -> (Vec<u8>, WEHint<E>) {
     // Generate a random key for each clause
-    let mut master_key = [0u8; 32];
+    let mut master_key = [0u8; 16];
     //let mut clause_keys = Vec::new();
 
     let mut we_hint = WEHint { clauses: Vec::new(), num_variables: formula.num_variables };
@@ -144,11 +144,11 @@ pub fn sat_encryption<'a, E:Pairing>(
     // For each clause, generate a random key and XOR it into the master key
     for i in 0..formula.clauses.len() {
         let clause = &formula.clauses[i];
-        let mut clause_key = [0u8; 32];
+        let mut clause_key = [0u8; 16];
         rng.fill_bytes(&mut clause_key);
         
         // XOR this key into the master key
-        for i in 0..32 {
+        for i in 0..16 {
             master_key[i] ^= clause_key[i];
         }
         
@@ -201,12 +201,12 @@ pub fn sat_decryption<'a, E:Pairing>(
     srs: &KZGStructuredReferenceString<E>
 ) -> Vec<u8> {
     // Initialize master key (all zeros)
-    let mut master_key = [0u8; 32];
+    let mut master_key = [0u8; 16];
     
     // For each clause in the hint
     for clause in &hint.clauses {
         let mut clause_satisfied = false;
-        let mut recovered_clause_key: Option<[u8; 32]> = None;
+        let mut recovered_clause_key: Option<[u8; 16]> = None;
         
         // Try to decrypt using any satisfied literal in the clause
         for literal in &clause.literals {
@@ -239,7 +239,7 @@ pub fn sat_decryption<'a, E:Pairing>(
         if clause_satisfied {
             if let Some(clause_key) = recovered_clause_key {
                 // XOR this key into the master key
-                for i in 0..32 {
+                for i in 0..16 {
                     master_key[i] ^= clause_key[i];
                 }
             }
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt_aes() {
         let test_message = b"This is a test message";
-        let key = [0x41u8; 32];
+        let key = [0x41u8; 16];
         
         let ciphertext = encrypt_aes(test_message, &key);
         let decrypted = decrypt_aes(&ciphertext, &key);
